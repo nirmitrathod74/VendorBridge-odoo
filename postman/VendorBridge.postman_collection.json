@@ -1,0 +1,81 @@
+{
+  "info": {
+    "name": "VendorBridge API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8000/api" },
+    { "key": "accessToken", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Auth Login",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/auth/login/",
+        "body": { "mode": "raw", "raw": "{\n  \"email\": \"admin@example.com\",\n  \"password\": \"password\"\n}" }
+      }
+    },
+    {
+      "name": "Dashboard",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+        "url": "{{baseUrl}}/dashboard/"
+      }
+    },
+    {
+      "name": "Create Vendor",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/vendors/",
+        "body": { "mode": "raw", "raw": "{\n  \"name\": \"Amit Sharma\",\n  \"company_name\": \"Acme Supplies\",\n  \"email\": \"vendor@example.com\",\n  \"phone\": \"9999999999\",\n  \"gst_number\": \"29ABCDE1234F1Z5\",\n  \"category\": \"goods\"\n}" }
+      }
+    },
+    {
+      "name": "Create RFQ",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/rfqs/",
+        "body": { "mode": "raw", "raw": "{\n  \"title\": \"Laptop Procurement\",\n  \"description\": \"Need laptops for engineering team\",\n  \"deadline\": \"2026-07-01\",\n  \"assigned_vendors\": [1],\n  \"items\": [{\"product_name\": \"Laptop\", \"quantity\": 10, \"unit\": \"Units\", \"description\": \"16GB RAM\"}]\n}" }
+      }
+    },
+    {
+      "name": "Publish RFQ",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+        "url": "{{baseUrl}}/rfqs/1/publish/"
+      }
+    },
+    {
+      "name": "Create Quotation",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/quotations/",
+        "body": { "mode": "raw", "raw": "{\n  \"rfq\": 1,\n  \"vendor\": 1,\n  \"price\": \"500000.00\",\n  \"tax\": \"90000.00\",\n  \"delivery_days\": 7,\n  \"warranty\": \"1 year\",\n  \"notes\": \"Ready stock\"\n}" }
+      }
+    },
+    {
+      "name": "Submit Quotation",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+        "url": "{{baseUrl}}/quotations/1/submit/"
+      }
+    }
+  ]
+}
