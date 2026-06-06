@@ -4,6 +4,7 @@ from django.core.validators import FileExtensionValidator
 from django.core.validators import MinValueValidator
 from django.db import models
 from django.utils import timezone
+from decimal import Decimal
 
 from apps.vendors.models import Vendor
 
@@ -100,7 +101,7 @@ class RFQItem(models.Model):
     rfq = models.ForeignKey(RFQ, on_delete=models.CASCADE, related_name="items")
     product_name = models.CharField(max_length=180)
     description = models.TextField(blank=True)
-    quantity = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(0.01)])
+    quantity = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))])
     unit = models.CharField(max_length=30, default="Units")
 
     class Meta:
@@ -121,8 +122,8 @@ class Quotation(models.Model):
     quotation_number = models.CharField(max_length=30, unique=True, blank=True)
     rfq = models.ForeignKey(RFQ, on_delete=models.CASCADE, related_name="quotations")
     vendor = models.ForeignKey(Vendor, on_delete=models.PROTECT, related_name="quotations")
-    price = models.DecimalField(max_digits=14, decimal_places=2, validators=[MinValueValidator(0)])
-    tax = models.DecimalField(max_digits=14, decimal_places=2, default=0, validators=[MinValueValidator(0)])
+    price = models.DecimalField(max_digits=14, decimal_places=2, validators=[MinValueValidator(Decimal("0"))])
+    tax = models.DecimalField(max_digits=14, decimal_places=2, default=0, validators=[MinValueValidator(Decimal("0"))])
     delivery_days = models.PositiveIntegerField(default=0)
     warranty = models.CharField(max_length=120, blank=True)
     notes = models.TextField(blank=True)
@@ -235,6 +236,15 @@ class PurchaseOrder(models.Model):
             models.Index(fields=["created_at"]),
         ]
 
+    def can_transition_to(self, next_status):
+        transitions = {
+            self.Status.DRAFT: {self.Status.CONFIRMED, self.Status.CANCELLED},
+            self.Status.CONFIRMED: {self.Status.INVOICED, self.Status.CANCELLED},
+            self.Status.INVOICED: set(),
+            self.Status.CANCELLED: set(),
+        }
+        return next_status in transitions.get(self.status, set())
+
 
 class Invoice(models.Model):
     class Status(models.TextChoices):
@@ -269,6 +279,16 @@ class Invoice(models.Model):
             models.Index(fields=["due_date"]),
             models.Index(fields=["created_at"]),
         ]
+
+    def can_transition_to(self, next_status):
+        transitions = {
+            self.Status.DRAFT: {self.Status.SENT, self.Status.PAID, self.Status.CANCELLED},
+            self.Status.SENT: {self.Status.PAID, self.Status.OVERDUE, self.Status.CANCELLED},
+            self.Status.OVERDUE: {self.Status.PAID, self.Status.CANCELLED},
+            self.Status.PAID: set(),
+            self.Status.CANCELLED: set(),
+        }
+        return next_status in transitions.get(self.status, set())
 
 
 class Notification(models.Model):

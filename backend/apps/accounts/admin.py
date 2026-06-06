@@ -7,5 +7,10 @@ from .models import User
 @admin.register(User)
 class VendorBridgeUserAdmin(UserAdmin):
     fieldsets = UserAdmin.fieldsets + (("VendorBridge", {"fields": ("role", "phone")}),)
-    list_display = ("email", "username", "role", "is_active", "is_staff")
-    list_filter = ("role", "is_active", "is_staff")
+    add_fieldsets = UserAdmin.add_fieldsets + (
+        ("VendorBridge", {"fields": ("email", "first_name", "last_name", "role", "phone")}),
+    )
+    list_display = ("email", "username", "first_name", "last_name", "role", "is_active", "is_staff", "is_superuser")
+    list_filter = ("role", "is_active", "is_staff", "is_superuser")
+    search_fields = ("email", "username", "first_name", "last_name", "phone")
+    ordering = ("email",)

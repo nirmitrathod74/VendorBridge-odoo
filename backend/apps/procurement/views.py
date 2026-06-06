@@ -2,9 +2,9 @@ from django.http import FileResponse
 from rest_framework import decorators, permissions, status, viewsets
 from rest_framework.response import Response
 
-from apps.accounts.permissions import IsApproverOrAdmin, IsOfficerApproverOrAdmin, IsOfficerOrAdmin
+from apps.accounts.permissions import IsApproverOrAdmin, IsOfficerApproverOrAdmin, IsOfficerOrAdmin, IsOfficerVendorOrAdmin
 
-from .models import Approval, AuditLog, Invoice, PurchaseOrder, Quotation, RFQ
+from .models import Approval, AuditLog, Invoice, Notification, PurchaseOrder, Quotation, RFQ
 from .serializers import (
     ApprovalSerializer,
     AuditLogSerializer,
@@ -91,7 +91,7 @@ class QuotationViewSet(viewsets.ModelViewSet):
     ordering_fields = ["price", "delivery_days", "created_at"]
 
     def get_queryset(self):
-        queryset = Quotation.objects.select_related("rfq", "vendor").all()
+        queryset = Quotation.objects.select_related("rfq", "vendor").order_by("-created_at")
         user = self.request.user
         if user.is_superuser or user.role in {"admin", "officer", "approver"}:
             return queryset
@@ -100,7 +100,9 @@ class QuotationViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         if self.action in ["select_for_approval"]:
             return [IsOfficerOrAdmin()]
-        if self.request.method in permissions.SAFE_METHODS or self.action == "submit":
+        if self.action in ["create", "submit"]:
+            return [IsOfficerVendorOrAdmin()]
+        if self.request.method in permissions.SAFE_METHODS:
             return [permissions.IsAuthenticated()]
         return super().get_permissions()
 
@@ -114,7 +116,7 @@ class QuotationViewSet(viewsets.ModelViewSet):
 
     @decorators.action(detail=True, methods=["post"], url_path="select-for-approval")
     def select_for_approval(self, request, pk=None):
-        approval, created = select_quotation_for_approval(pk, request.user)
+        approval, created = select_quotation_for_approval(pk, request.user, request.data.get("approver"))
         return Response(ApprovalSerializer(approval).data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
 
@@ -123,10 +125,12 @@ class ApprovalViewSet(viewsets.ModelViewSet):
     filterset_fields = ["status", "approver", "quotation"]
 
     def get_queryset(self):
-        queryset = Approval.objects.select_related("quotation", "approver").all()
+        queryset = Approval.objects.select_related("quotation__rfq", "quotation__vendor", "approver").order_by("-created_at")
         user = self.request.user
-        if user.is_superuser or user.role in {"admin", "officer", "approver"}:
+        if user.is_superuser or user.role in {"admin", "officer"}:
             return queryset
+        if user.role == "approver":
+            return queryset.filter(approver=user)
         return queryset.filter(quotation__vendor__user=user)
 
     def get_permissions(self):
@@ -136,6 +140,12 @@ class ApprovalViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(approver=self.request.user)
+
+    def create(self, request, *args, **kwargs):
+        return Response(
+            {"detail": "Create approvals by selecting a submitted quotation for approval."},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
 
     @decorators.action(detail=True, methods=["post"])
     def approve(self, request, pk=None):
@@ -153,7 +163,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
     filterset_fields = ["status"]
 
     def get_queryset(self):
-        queryset = PurchaseOrder.objects.select_related("quotation__rfq", "quotation__vendor").all()
+        queryset = PurchaseOrder.objects.select_related("quotation__rfq", "quotation__vendor").order_by("-created_at")
         user = self.request.user
         if user.is_superuser or user.role in {"admin", "officer", "approver"}:
             return queryset
@@ -163,6 +173,12 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         if self.request.method in permissions.SAFE_METHODS:
             return [permissions.IsAuthenticated()]
         return [IsOfficerOrAdmin()]
+
+    def create(self, request, *args, **kwargs):
+        return Response(
+            {"detail": "Purchase orders are created only when an approval is accepted."},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
 
     @decorators.action(detail=True, methods=["post"], url_path="generate-invoice")
     def generate_invoice(self, request, pk=None):
@@ -185,7 +201,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
     filterset_fields = ["status", "invoice_date", "due_date"]
 
     def get_queryset(self):
-        queryset = Invoice.objects.select_related("purchase_order__quotation__vendor").all()
+        queryset = Invoice.objects.select_related("purchase_order__quotation__rfq", "purchase_order__quotation__vendor").order_by("-created_at")
         user = self.request.user
         if user.is_superuser or user.role in {"admin", "officer", "approver"}:
             return queryset
@@ -195,6 +211,12 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         if self.request.method in permissions.SAFE_METHODS:
             return [permissions.IsAuthenticated()]
         return [IsOfficerOrAdmin()]
+
+    def create(self, request, *args, **kwargs):
+        return Response(
+            {"detail": "Invoices are generated from purchase orders."},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
 
     @decorators.action(detail=True, methods=["post"], url_path="send-email")
     def send_email(self, request, pk=None):

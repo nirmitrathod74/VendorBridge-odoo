@@ -1,6 +1,7 @@
 import json
 
 from django.core.cache import cache
+from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -110,6 +111,8 @@ def create_quotation(serializer, user):
 def submit_quotation(quotation_id, user):
     with transaction.atomic():
         quotation = Quotation.objects.select_for_update().select_related("rfq", "vendor").get(pk=quotation_id)
+        if user.role == "vendor" and quotation.vendor.user_id != user.id:
+            raise PermissionDenied("Vendor users can only submit quotations for their own vendor profile.")
         if quotation.status == Quotation.Status.SUBMITTED:
             return quotation, False
         if not quotation.can_transition_to(Quotation.Status.SUBMITTED):
@@ -128,7 +131,7 @@ def submit_quotation(quotation_id, user):
     return quotation, True
 
 
-def select_quotation_for_approval(quotation_id, user):
+def select_quotation_for_approval(quotation_id, user, approver_id=None):
     with transaction.atomic():
         quotation = Quotation.objects.select_for_update().get(pk=quotation_id)
         existing = quotation.approvals.exclude(status=Approval.Status.REJECTED).first()
@@ -136,9 +139,21 @@ def select_quotation_for_approval(quotation_id, user):
             return existing, False
         if not quotation.can_transition_to(Quotation.Status.SELECTED):
             raise ValidationError({"status": f"Cannot select quotation from {quotation.status}."})
+        User = get_user_model()
+        approver_queryset = User.objects.filter(is_active=True).filter(role=User.Role.APPROVER)
+        if approver_id:
+            approver = approver_queryset.filter(pk=approver_id).first()
+            if not approver:
+                raise ValidationError({"approver": "Selected user must be an active approver."})
+        else:
+            approver = approver_queryset.order_by("id").first()
+            if not approver:
+                approver = User.objects.filter(is_active=True, role=User.Role.ADMIN).order_by("id").first()
+            if not approver:
+                raise ValidationError({"approver": "No active approver is available for this workflow."})
         quotation.status = Quotation.Status.SELECTED
         quotation.save(update_fields=["status", "updated_at"])
-        approval = Approval.objects.create(quotation=quotation, approver=user)
+        approval = Approval.objects.create(quotation=quotation, approver=approver)
         audit(user, "select", "Quotation", quotation, f"Quotation {quotation.quotation_number} selected")
     invalidate_analytics_cache()
     return approval, True
@@ -189,6 +204,8 @@ def reject_request(approval_id, user, remarks=None):
 def generate_invoice_from_po(po_id, user):
     with transaction.atomic():
         po = PurchaseOrder.objects.select_for_update().get(pk=po_id)
+        if not po.can_transition_to(PurchaseOrder.Status.INVOICED) and po.status != PurchaseOrder.Status.INVOICED:
+            raise ValidationError({"status": f"Cannot generate invoice from purchase order status {po.status}."})
         invoice, created = Invoice.objects.get_or_create(purchase_order=po)
         if po.status != PurchaseOrder.Status.INVOICED:
             po.status = PurchaseOrder.Status.INVOICED
@@ -205,6 +222,8 @@ def transition_purchase_order(po_id, user, next_status, action):
         po = PurchaseOrder.objects.select_for_update().get(pk=po_id)
         if po.status == next_status:
             return po, False
+        if not po.can_transition_to(next_status):
+            raise ValidationError({"status": f"Cannot transition purchase order from {po.status} to {next_status}."})
         po.status = next_status
         po.save(update_fields=["status", "updated_at"])
         audit(user, action, "PurchaseOrder", po, f"Purchase order {po.po_number} {action}")
@@ -217,6 +236,8 @@ def transition_invoice(invoice_id, user, next_status, action):
         invoice = Invoice.objects.select_for_update().get(pk=invoice_id)
         if invoice.status == next_status:
             return invoice, False
+        if not invoice.can_transition_to(next_status):
+            raise ValidationError({"status": f"Cannot transition invoice from {invoice.status} to {next_status}."})
         invoice.status = next_status
         invoice.save(update_fields=["status", "updated_at"])
         audit(user, action, "Invoice", invoice, f"Invoice {invoice.invoice_number} {action}")

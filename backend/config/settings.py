@@ -20,7 +20,7 @@ INSTALLED_APPS = [
     "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
     "django_filters",
-    "apps.accounts",
+    "apps.accounts.apps.AccountsConfig",
     "apps.vendors",
     "apps.procurement",
     "apps.reports",
@@ -126,6 +126,7 @@ SIMPLE_JWT = {
 
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/1")
+CELERY_TASK_ALWAYS_EAGER = True
 
 CACHES = {
     "default": {

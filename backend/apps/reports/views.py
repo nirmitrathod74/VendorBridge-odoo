@@ -4,11 +4,12 @@ from django.core.cache import cache
 from django.db import connection
 from django.db.models import Avg, Count, Sum
 from django.http import HttpResponse
+from django.utils import timezone
 from rest_framework import decorators, viewsets
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.accounts.permissions import IsOfficerOrAdmin
+from apps.accounts.permissions import IsOfficerApproverOrAdmin
 from apps.procurement.models import Approval, Invoice, PurchaseOrder, Quotation, RFQ
 from apps.vendors.models import Vendor
 
@@ -42,27 +43,50 @@ class HealthCheckView(APIView):
 
 
 class DashboardView(APIView):
-    permission_classes = [IsOfficerOrAdmin]
+    permission_classes = [IsOfficerApproverOrAdmin]
 
     def get(self, request):
         cached = cache.get("vendorbridge:dashboard")
         if cached:
             return Response(cached)
         invoices = Invoice.objects.exclude(status=Invoice.Status.CANCELLED)
+        recent_purchase_orders = [
+            {
+                "id": po.id,
+                "po_number": po.po_number,
+                "status": po.status,
+                "created_at": po.created_at,
+                "vendor_name": po.quotation.vendor.company_name,
+                "total": po.total,
+            }
+            for po in PurchaseOrder.objects.select_related("quotation__vendor").order_by("-created_at")[:5]
+        ]
+        recent_invoices = [
+            {
+                "id": invoice.id,
+                "invoice_number": invoice.invoice_number,
+                "status": invoice.status,
+                "created_at": invoice.created_at,
+                "vendor_name": invoice.purchase_order.quotation.vendor.company_name,
+                "total": invoice.total,
+            }
+            for invoice in invoices.select_related("purchase_order__quotation__vendor").order_by("-created_at")[:5]
+        ]
         data = {
             "total_vendors": Vendor.objects.filter(is_deleted=False).count(),
             "active_rfqs": RFQ.objects.filter(is_deleted=False, status__in=[RFQ.Status.PUBLISHED, RFQ.Status.PENDING_QUOTATIONS]).count(),
             "pending_approvals": Approval.objects.filter(status__in=[Approval.Status.PENDING, Approval.Status.UNDER_REVIEW, Approval.Status.ESCALATED]).count(),
-            "recent_purchase_orders": list(PurchaseOrder.objects.order_by("-created_at")[:5].values("id", "po_number", "status", "created_at")),
-            "recent_invoices": list(invoices.order_by("-created_at")[:5].values("id", "invoice_number", "status", "created_at")),
+            "recent_purchase_orders": recent_purchase_orders,
+            "recent_invoices": recent_invoices,
             "total_procurement_value": invoices.aggregate(total=Sum("purchase_order__quotation__price"))["total"] or 0,
+            "overdue_invoices": invoices.filter(due_date__lt=timezone.localdate()).exclude(status=Invoice.Status.PAID).count(),
         }
         cache.set("vendorbridge:dashboard", data, timeout=60)
         return Response(data)
 
 
 class ReportViewSet(viewsets.ViewSet):
-    permission_classes = [IsOfficerOrAdmin]
+    permission_classes = [IsOfficerApproverOrAdmin]
 
     @decorators.action(detail=False, methods=["get"], url_path="vendor-performance")
     def vendor_performance(self, request):

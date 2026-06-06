@@ -25,6 +25,15 @@ class IsOfficerApproverOrAdmin(BasePermission):
         )
 
 
+class IsOfficerVendorOrAdmin(BasePermission):
+    def has_permission(self, request, view):
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and (request.user.is_officer_role() or request.user.role == "vendor")
+        )
+
+
 class IsVendorRole(BasePermission):
     def has_permission(self, request, view):
         return bool(request.user and request.user.is_authenticated and request.user.role == "vendor")

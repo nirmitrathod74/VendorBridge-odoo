@@ -8,6 +8,16 @@ from rest_framework_simplejwt.tokens import RefreshToken
 User = get_user_model()
 
 
+def validate_password_strength(value):
+    if not any(char.isupper() for char in value):
+        raise serializers.ValidationError("Password must contain at least one uppercase letter.")
+    if not any(char.islower() for char in value):
+        raise serializers.ValidationError("Password must contain at least one lowercase letter.")
+    if not any(char.isdigit() for char in value):
+        raise serializers.ValidationError("Password must contain at least one number.")
+    return value
+
+
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
@@ -23,9 +33,12 @@ class SignupSerializer(serializers.ModelSerializer):
         fields = ["id", "username", "email", "password", "first_name", "last_name", "role", "phone"]
         read_only_fields = ["id"]
 
+    def validate_password(self, value):
+        return validate_password_strength(value)
+
     def validate_role(self, value):
-        if value == User.Role.ADMIN:
-            raise serializers.ValidationError("Admin users must be created from the admin/user management screen.")
+        if value != User.Role.VENDOR:
+            raise serializers.ValidationError("Public signup is limited to vendor accounts.")
         return value
 
     def create(self, validated_data):
@@ -67,6 +80,9 @@ class ResetPasswordSerializer(serializers.Serializer):
     uid = serializers.CharField()
     token = serializers.CharField()
     password = serializers.CharField(write_only=True, min_length=8)
+
+    def validate_password(self, value):
+        return validate_password_strength(value)
 
     def validate(self, attrs):
         try:

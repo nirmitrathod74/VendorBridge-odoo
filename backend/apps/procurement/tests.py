@@ -102,6 +102,33 @@ class VendorBridgeAPITestCase(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
+    def test_officer_can_view_approval_workflow_but_cannot_decide(self):
+        self.authenticate(self.officer)
+
+        list_response = self.client.get("/api/approvals/")
+        approve_response = self.client.post(f"/api/approvals/{self.approval.id}/approve/", {"remarks": "Officer attempt"}, format="json")
+
+        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(approve_response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_approver_can_view_context_but_cannot_create_procurement_records(self):
+        self.authenticate(self.approver)
+
+        self.assertEqual(self.client.get("/api/vendors/").status_code, status.HTTP_200_OK)
+        self.assertEqual(self.client.get("/api/rfqs/").status_code, status.HTTP_200_OK)
+        self.assertEqual(self.client.get("/api/quotations/").status_code, status.HTTP_200_OK)
+        self.assertEqual(self.client.post(
+            "/api/rfqs/",
+            {
+                "title": "Approver RFQ",
+                "description": "Should fail",
+                "deadline": str(timezone.localdate() + timedelta(days=5)),
+                "assigned_vendors": [self.vendor.id],
+                "items": [{"product_name": "Mouse", "quantity": "5", "unit": "Units"}],
+            },
+            format="json",
+        ).status_code, status.HTTP_403_FORBIDDEN)
+
     def test_vendor_only_sees_own_quotations(self):
         Quotation.objects.create(
             rfq=self.rfq,
@@ -128,9 +155,59 @@ class VendorBridgeAPITestCase(APITestCase):
         self.assertEqual(first.status_code, status.HTTP_201_CREATED)
         self.assertEqual(second.status_code, status.HTTP_200_OK)
         self.assertEqual(PurchaseOrder.objects.filter(quotation=self.quotation).count(), 1)
+        self.assertEqual(PurchaseOrder.objects.get(quotation=self.quotation).status, PurchaseOrder.Status.DRAFT)
+
+    def test_select_quotation_assigns_active_approver(self):
+        self.rfq.assigned_vendors.add(self.other_vendor)
+        quotation = Quotation.objects.create(
+            rfq=self.rfq,
+            vendor=self.other_vendor,
+            price="610000.00",
+            tax="109800.00",
+            delivery_days=10,
+            status=Quotation.Status.SUBMITTED,
+            submitted_at=timezone.now(),
+        )
+        self.authenticate(self.officer)
+
+        response = self.client.post(f"/api/quotations/{quotation.id}/select-for-approval/", format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(Approval.objects.get(id=response.data["id"]).approver, self.approver)
+
+    def test_approver_only_sees_assigned_approval_tasks(self):
+        User = get_user_model()
+        other_approver = User.objects.create_user(
+            username="approver2",
+            email="approver2@test.com",
+            password="pass12345",
+            role=User.Role.APPROVER,
+        )
+        Approval.objects.create(quotation=self.quotation, approver=other_approver, status=Approval.Status.REJECTED)
+        self.authenticate(self.approver)
+
+        response = self.client.get("/api/approvals/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["approver"], self.approver.id)
+
+    def test_vendor_cannot_submit_another_vendors_quotation(self):
+        quote = Quotation.objects.create(
+            rfq=self.rfq,
+            vendor=self.other_vendor,
+            price="600000.00",
+            tax="108000.00",
+            delivery_days=12,
+        )
+        self.authenticate(self.vendor_user)
+
+        response = self.client.post(f"/api/quotations/{quote.id}/submit/", format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_generate_invoice_is_idempotent(self):
-        po = PurchaseOrder.objects.create(quotation=self.quotation)
+        po = PurchaseOrder.objects.create(quotation=self.quotation, status=PurchaseOrder.Status.CONFIRMED)
         self.authenticate(self.officer)
 
         with patch("apps.procurement.services.generate_invoice_pdf.delay"):
@@ -140,6 +217,24 @@ class VendorBridgeAPITestCase(APITestCase):
         self.assertEqual(first.status_code, status.HTTP_201_CREATED)
         self.assertEqual(second.status_code, status.HTTP_201_CREATED)
         self.assertEqual(Invoice.objects.filter(purchase_order=po).count(), 1)
+
+    def test_invoice_generation_requires_confirmed_po(self):
+        po = PurchaseOrder.objects.create(quotation=self.quotation)
+        self.authenticate(self.officer)
+
+        response = self.client.post(f"/api/purchase-orders/{po.id}/generate-invoice/")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_workflow_status_cannot_be_patched_directly(self):
+        po = PurchaseOrder.objects.create(quotation=self.quotation)
+        self.authenticate(self.officer)
+
+        response = self.client.patch(f"/api/purchase-orders/{po.id}/", {"status": "invoiced"}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        po.refresh_from_db()
+        self.assertEqual(po.status, PurchaseOrder.Status.DRAFT)
 
     def test_health_endpoint_is_public(self):
         response = self.client.get("/api/health/")
