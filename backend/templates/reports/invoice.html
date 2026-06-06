@@ -1,0 +1,41 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: Arial, sans-serif; color: #1f2937; }
+    h1 { color: #0f766e; }
+    table { width: 100%; border-collapse: collapse; margin-top: 24px; }
+    th, td { border: 1px solid #d1d5db; padding: 10px; text-align: left; }
+    th { background: #f3f4f6; }
+    .total { text-align: right; font-size: 18px; font-weight: 700; margin-top: 24px; }
+  </style>
+</head>
+<body>
+  <h1>Invoice {{ invoice.invoice_number }}</h1>
+  <p><strong>Vendor:</strong> {{ invoice.purchase_order.quotation.vendor.company_name }}</p>
+  <p><strong>PO:</strong> {{ invoice.purchase_order.po_number }}</p>
+  <p><strong>Date:</strong> {{ invoice.invoice_date }}</p>
+  <table>
+    <thead>
+      <tr>
+        <th>RFQ</th>
+        <th>Quotation</th>
+        <th>Amount</th>
+        <th>Tax</th>
+        <th>Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>{{ invoice.purchase_order.quotation.rfq.rfq_number }}</td>
+        <td>{{ invoice.purchase_order.quotation.quotation_number }}</td>
+        <td>{{ invoice.purchase_order.quotation.price }}</td>
+        <td>{{ invoice.purchase_order.quotation.tax }}</td>
+        <td>{{ invoice.total }}</td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="total">Total Due: {{ invoice.total }}</div>
+</body>
+</html>
